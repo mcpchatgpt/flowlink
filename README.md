@@ -7,7 +7,7 @@ updates.
 
 ## Repository layout
 
-- `server/`: Ubuntu service, CLI, health repair and port rotation.
+- `server/`: Ubuntu service, CLI, health repair and a 4+8 UDP port pool.
 - `android/`: FlowLink Android application.
 - `tunnel/`: minimal Apache-2.0 WireGuard Android tunnel fork adding
   `wgSetConfig` for in-place endpoint updates.
