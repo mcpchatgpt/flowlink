@@ -4,7 +4,7 @@ import argparse, json, sys
 from pathlib import Path
 from flowlink_core import (CONFIG_PATH, STATE_PATH, VERSION, FlowLinkError,
     app_update, create_enrollment, effective_ports, load_json, maintain,
-    publish_apk, remove_device, rotate_ports, wireguard_status)
+    migrate_config, publish_apk, remove_device, rotate_ports, wireguard_status)
 
 def output(value: object) -> None:
     print(json.dumps(value, indent=2, sort_keys=True))
@@ -31,6 +31,7 @@ def main() -> None:
     publish.add_argument("--version-name", required=True)
     publish.add_argument("--mandatory", action="store_true")
     sub.add_parser("app-update")
+    sub.add_parser("migrate-config")
     args = parser.parse_args()
     config = load_json(CONFIG_PATH)
     try:
@@ -64,6 +65,8 @@ def main() -> None:
                                args.version_name, args.mandatory))
         elif args.command == "app-update":
             output(app_update())
+        elif args.command == "migrate-config":
+            output(migrate_config())
     except FlowLinkError as exc:
         output({"ok": False, "error": str(exc)})
         sys.exit(1)
