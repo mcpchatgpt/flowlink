@@ -1,8 +1,10 @@
 import base64, hashlib, hmac, tempfile, unittest
 from pathlib import Path
 from unittest.mock import Mock, patch
+import flowlink_core
 from flowlink_core import (FlowLinkError, app_update, effective_ports,
-    publish_apk, token_hash, validate_public_key, wireguard_status)
+    migrate_config, publish_apk, token_hash, validate_public_key,
+    wireguard_status)
 class CoreTests(unittest.TestCase):
     def test_hmac_signature_is_deterministic(self):
         first = hmac.new(b"token", b"body", hashlib.sha256).hexdigest()
@@ -42,5 +44,30 @@ class CoreTests(unittest.TestCase):
         self.assertEqual(status["latest_handshake"], 123)
         self.assertEqual(status["rx_bytes"], 456)
         self.assertEqual(status["tx_bytes"], 789)
+    def test_migrate_config_expands_port_pool(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            config_path, state_path = root / "node.json", root / "state.json"
+            config_path.write_text(
+                '{"version":2,"ports":[443,2053,8443,51820],'
+                '"stable_ports":[443,51820],"https_port":443,'
+                '"rotating_port_count":2,"rotating_port_range":[20000,60000],'
+                '"rotation_interval_seconds":86400,"port_grace_seconds":172800}',
+                encoding="utf-8")
+            patches = (
+                patch.object(flowlink_core, "CONFIG_PATH", config_path),
+                patch.object(flowlink_core, "STATE_PATH", state_path),
+                patch.object(flowlink_core, "LOCK_PATH", root / "state.lock"),
+                patch("flowlink_core.secrets.randbelow",
+                      side_effect=range(100, 108)))
+            with patches[0], patches[1], patches[2], patches[3]:
+                result = migrate_config()
+                config = flowlink_core.load_json(config_path)
+                state = flowlink_core.load_json(state_path)
+            self.assertTrue(result["changed"])
+            self.assertEqual(config["stable_ports"], [443, 2053, 8443, 51820])
+            self.assertEqual(config["rotating_port_count"], 8)
+            self.assertEqual(config["rotation_interval_seconds"], 21600)
+            self.assertEqual(len(state["active_ports"]), 12)
 if __name__ == "__main__":
     unittest.main()
