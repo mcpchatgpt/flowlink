@@ -1,0 +1,12 @@
+[Unit]
+Description=FlowLink UDP aliases and NAT
+After=network-online.target wg-quick@flwg0.service ufw.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/opt/flowlink-server/apply-network.sh
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

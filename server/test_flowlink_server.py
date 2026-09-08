@@ -1,0 +1,46 @@
+import base64, hashlib, hmac, tempfile, unittest
+from pathlib import Path
+from unittest.mock import Mock, patch
+from flowlink_core import (FlowLinkError, app_update, effective_ports,
+    publish_apk, token_hash, validate_public_key, wireguard_status)
+class CoreTests(unittest.TestCase):
+    def test_hmac_signature_is_deterministic(self):
+        first = hmac.new(b"token", b"body", hashlib.sha256).hexdigest()
+        second = hmac.new(b"token", b"body", hashlib.sha256).hexdigest()
+        self.assertEqual(first, second)
+        self.assertEqual(len(first), 64)
+    def test_token_hash_does_not_store_raw_token(self):
+        self.assertNotEqual(token_hash("secret"), "secret")
+    def test_public_key_validation(self):
+        key = base64.b64encode(bytes(range(32))).decode()
+        self.assertEqual(validate_public_key(key), key)
+        with self.assertRaises(FlowLinkError):
+            validate_public_key("bad")
+    def test_effective_ports_honors_grace(self):
+        state = {"active_ports": [443, 51820],
+                 "grace_ports": [{"port": 8443, "expires_at": 200},
+                                 {"port": 2053, "expires_at": 99}]}
+        self.assertEqual(effective_ports(state, 100), [443, 51820, 8443])
+    def test_publish_apk_manifest(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            source = root / "source.apk"
+            source.write_bytes(b"test-apk")
+            with patch("flowlink_core.RELEASE_DIR", root), \
+                 patch("flowlink_core.APK_PATH", root / "latest.apk"), \
+                 patch("flowlink_core.UPDATE_PATH", root / "update.json"):
+                result = publish_apk(source, 2, "0.2.0")
+                self.assertEqual(result["version_code"], 2)
+                self.assertEqual(result["size"], 8)
+                self.assertTrue(app_update()["available"])
+    def test_wireguard_dump_peer_columns(self):
+        dump = ("private\tpublic\t51820\toff\n"
+                "peer\t(none)\t1.2.3.4:51820\t10.77.0.2/32\t123\t456\t789\toff\n")
+        completed = Mock(returncode=0, stdout=dump)
+        with patch("flowlink_core.run", return_value=completed):
+            status = wireguard_status({"interface": "flwg0"})
+        self.assertEqual(status["latest_handshake"], 123)
+        self.assertEqual(status["rx_bytes"], 456)
+        self.assertEqual(status["tx_bytes"], 789)
+if __name__ == "__main__":
+    unittest.main()

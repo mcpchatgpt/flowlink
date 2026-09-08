@@ -1,0 +1,9 @@
+[Unit]
+Description=Run FlowLink automatic repair every minute
+[Timer]
+OnBootSec=20s
+OnUnitActiveSec=60s
+AccuracySec=10s
+Persistent=true
+[Install]
+WantedBy=timers.target

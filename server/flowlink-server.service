@@ -1,0 +1,22 @@
+[Unit]
+Description=FlowLink HTTPS Enrollment and Configuration API
+After=network-online.target wg-quick@flwg0.service flowlink-network.service
+Wants=network-online.target
+[Service]
+Type=simple
+User=root
+Group=root
+ExecStart=/usr/bin/python3 /opt/flowlink-server/flowlink_server.py
+WorkingDirectory=/opt/flowlink-server
+Restart=always
+RestartSec=2
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/flowlink
+ReadOnlyPaths=/etc/flowlink /etc/wireguard
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_BIND_SERVICE
+MemoryMax=128M
+[Install]
+WantedBy=multi-user.target

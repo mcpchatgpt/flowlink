@@ -1,0 +1,12 @@
+*.apk
+*.aab
+*.jks
+*.keystore
+*.properties.local
+__pycache__/
+*.py[cod]
+.gradle/
+**/build/
+local.properties
+.idea/
+captures/

@@ -1,0 +1,7 @@
+[Unit]
+Description=FlowLink health monitor and automatic repair
+After=network-online.target wg-quick@flwg0.service
+[Service]
+Type=oneshot
+ExecStart=/opt/flowlink-server/flowlinkctl.py maintain
+Nice=10
