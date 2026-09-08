@@ -18,6 +18,7 @@ Private Android client for FlowLink Server 0.2.0.
 - Multiple independently enrolled VPS profiles with automatic failover.
 - In-place WireGuard endpoint and UDP-port updates on the active VPS.
 - Certificate-pinned APK update download with SHA-256 verification.
+- Focused connection dashboard with separate add-VPS and server-management screens.
 
 ## First pairing
 
