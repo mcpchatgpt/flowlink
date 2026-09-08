@@ -10,38 +10,22 @@ import android.graphics.Color;
 import android.net.VpnService;
 import android.os.Build;
 import android.os.Bundle;
-import android.text.InputType;
-import android.view.View;
-import android.widget.ArrayAdapter;
+import android.view.Gravity;
 import android.widget.Button;
-import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
-import android.widget.Spinner;
 import android.widget.TextView;
-import com.wireguard.crypto.KeyPair;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 
 public final class MainActivity extends Activity {
     private static final int VPN_REQUEST = 10;
-    private final ExecutorService worker = Executors.newSingleThreadExecutor();
     private FlowLinkStore store;
-    private Spinner profileSpinner;
-    private EditText profileName;
-    private EditText serverHost;
-    private EditText fingerprint;
-    private EditText enrollmentToken;
     private TextView status;
     private TextView detail;
-    private Button registerButton;
+    private TextView power;
+    private TextView serverName;
+    private TextView serverDetail;
     private Button connectButton;
-    private Button disconnectButton;
-    private Button removeButton;
-    private boolean refreshingProfiles;
-    private List<ServerProfile> shownProfiles = new ArrayList<>();
+    private boolean connected;
 
     private final BroadcastReceiver statusReceiver = new BroadcastReceiver() {
         @Override public void onReceive(Context context, Intent intent) {
@@ -49,10 +33,10 @@ public final class MainActivity extends Activity {
             String name = intent.getStringExtra("profile");
             String host = intent.getStringExtra("host");
             int port = intent.getIntExtra("port", -1);
-            status.setText(value == null ? "状态未知" : value);
-            if (host != null)
-                detail.setText((name == null ? "" : name + " · ") + host
-                        + (port > 0 ? " · UDP " + port : ""));
+            connected = value != null && (value.startsWith("已连接")
+                    || value.contains("VPN正常"));
+            renderConnection(value == null ? "状态未知" : value,
+                    name, host, port);
         }
     };
 
@@ -60,7 +44,6 @@ public final class MainActivity extends Activity {
         super.onCreate(savedInstanceState);
         store = new FlowLinkStore(this);
         buildUi();
-        refreshProfiles();
         IntentFilter filter = new IntentFilter(FlowLinkMonitorService.ACTION_STATUS);
         if (Build.VERSION.SDK_INT >= 33)
             registerReceiver(statusReceiver, filter, RECEIVER_NOT_EXPORTED);
@@ -73,128 +56,150 @@ public final class MainActivity extends Activity {
     }
 
     private void buildUi() {
-        int padding = dp(24);
-        LinearLayout root = new LinearLayout(this);
-        root.setOrientation(LinearLayout.VERTICAL);
-        root.setPadding(padding, dp(40), padding, padding);
-        root.setBackgroundColor(Color.rgb(244, 247, 246));
-
-        TextView title = text("FlowLink", 30, Color.rgb(20, 55, 49));
-        title.setTypeface(null, android.graphics.Typeface.BOLD);
-        root.addView(title);
-        TextView subtitle = text("多服务器 · 自动换端口 · 自动更新", 15,
-                Color.rgb(83, 105, 100));
-        subtitle.setPadding(0, dp(6), 0, dp(22));
-        root.addView(subtitle);
-
-        LinearLayout card = card();
-        status = text("未注册", 24, Color.rgb(23, 107, 91));
-        status.setTypeface(null, android.graphics.Typeface.BOLD);
-        card.addView(status);
-        detail = text("尚未添加服务器", 14, Color.rgb(93, 108, 104));
-        detail.setPadding(0, dp(8), 0, dp(12));
-        card.addView(detail);
-
-        profileSpinner = new Spinner(this);
-        profileSpinner.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener() {
-            @Override public void onItemSelected(android.widget.AdapterView<?> parent,
-                                                 View view, int position, long id) {
-                if (refreshingProfiles || position < 0 || position >= shownProfiles.size()) return;
-                ServerProfile selected = shownProfiles.get(position);
-                store.select(selected.id);
-                detail.setText(selected.name + " · " + selected.host);
-                if (store.autoConnect()) startServiceAction(FlowLinkMonitorService.ACTION_SWITCH);
-            }
-            @Override public void onNothingSelected(android.widget.AdapterView<?> parent) {}
-        });
-        card.addView(profileSpinner, matchWrap());
-
-        connectButton = button("连接 VPN");
-        connectButton.setOnClickListener(v -> requestVpn());
-        card.addView(connectButton, matchWrap());
-        disconnectButton = button("断开连接");
-        disconnectButton.setOnClickListener(v -> stopVpn());
-        card.addView(disconnectButton, matchWrap());
-        Button updateButton = button("检查应用更新");
-        updateButton.setOnClickListener(v -> checkUpdate());
-        card.addView(updateButton, matchWrap());
-        removeButton = button("删除当前服务器");
-        removeButton.setOnClickListener(v -> removeCurrent());
-        card.addView(removeButton, matchWrap());
-        root.addView(card, matchWrap());
-
-        TextView addTitle = text("添加另一台 VPS", 20, Color.rgb(20, 55, 49));
-        addTitle.setTypeface(null, android.graphics.Typeface.BOLD);
-        addTitle.setPadding(0, dp(26), 0, dp(8));
-        root.addView(addTitle);
-        LinearLayout addCard = card();
-        profileName = input("名称，例如 vps-2", false);
-        serverHost = input("服务器 IP 或域名", false);
-        fingerprint = input("TLS SHA-256 指纹", true);
-        enrollmentToken = input("一次性配对令牌", true);
-        serverHost.setText(BuildConfig.FLOWLINK_HOST);
-        fingerprint.setText(BuildConfig.FLOWLINK_CERT_SHA256);
-        addCard.addView(profileName, matchWrap());
-        addCard.addView(serverHost, matchWrap());
-        addCard.addView(fingerprint, matchWrap());
-        addCard.addView(enrollmentToken, matchWrap());
-        registerButton = button("添加并注册服务器");
-        registerButton.setOnClickListener(v -> registerDevice());
-        addCard.addView(registerButton, matchWrap());
-        root.addView(addCard, matchWrap());
-
-        TextView note = text("同一时间只运行一个 VPN。当前服务器全部端口失败后，"
-                + "FlowLink 会尝试下一台已注册 VPS。应用更新会自动下载和校验，"
-                + "安装时仍需通过 Android 系统确认。", 14, Color.rgb(83, 105, 100));
-        note.setPadding(0, dp(24), 0, 0);
-        root.addView(note);
         ScrollView scroll = new ScrollView(this);
+        scroll.setFillViewport(true);
+        scroll.setBackgroundColor(Ui.BACKGROUND);
+        LinearLayout root = Ui.column(this, 22, 22, 22, 28);
+        root.setFocusableInTouchMode(true);
+        root.requestFocus();
+
+        LinearLayout header = Ui.row(this);
+        LinearLayout brand = Ui.column(this, 0, 0, 0, 0);
+        TextView title = Ui.text(this, "FlowLink", 29, Ui.INK, true);
+        TextView subtitle = Ui.text(this, "智能守护你的网络连接", 14, Ui.MUTED, false);
+        subtitle.setPadding(0, Ui.dp(this, 4), 0, 0);
+        brand.addView(title);
+        brand.addView(subtitle);
+        header.addView(brand, new LinearLayout.LayoutParams(0,
+                LinearLayout.LayoutParams.WRAP_CONTENT, 1));
+        TextView add = Ui.iconButton(this, "＋");
+        add.setContentDescription("添加 VPS");
+        add.setOnClickListener(v -> startActivity(
+                new Intent(this, AddServerActivity.class)));
+        header.addView(add, new LinearLayout.LayoutParams(
+                Ui.dp(this, 48), Ui.dp(this, 48)));
+        root.addView(header);
+
+        LinearLayout hero = Ui.card(this, 24);
+        LinearLayout.LayoutParams heroParams = Ui.matchWrap(this);
+        heroParams.topMargin = Ui.dp(this, 28);
+        hero.setGravity(Gravity.CENTER_HORIZONTAL);
+
+        hero.addView(Ui.pill(this, "  安全连接  ", Ui.SOFT_GREEN, Ui.GREEN));
+        power = Ui.text(this, "⌁", 52, Ui.GREEN, true);
+        power.setGravity(Gravity.CENTER);
+        power.setBackground(Ui.oval(Ui.PALE_GREEN));
+        LinearLayout.LayoutParams powerParams = new LinearLayout.LayoutParams(
+                Ui.dp(this, 116), Ui.dp(this, 116));
+        powerParams.topMargin = Ui.dp(this, 24);
+        powerParams.bottomMargin = Ui.dp(this, 20);
+        hero.addView(power, powerParams);
+
+        status = Ui.text(this, "未连接", 25, Ui.INK, true);
+        status.setGravity(Gravity.CENTER);
+        hero.addView(status);
+        detail = Ui.text(this, "选择服务器后即可安全连接", 14, Ui.MUTED, false);
+        detail.setGravity(Gravity.CENTER);
+        detail.setPadding(0, Ui.dp(this, 8), 0, Ui.dp(this, 22));
+        hero.addView(detail);
+
+        connectButton = Ui.primaryButton(this, "连接");
+        connectButton.setOnClickListener(v -> {
+            if (store.autoConnect()) stopVpn(); else requestVpn();
+        });
+        hero.addView(connectButton, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, Ui.dp(this, 56)));
+        root.addView(hero, heroParams);
+
+        TextView section = Ui.text(this, "当前服务器", 14, Ui.MUTED, true);
+        section.setPadding(Ui.dp(this, 2), Ui.dp(this, 26), 0, Ui.dp(this, 10));
+        root.addView(section);
+
+        LinearLayout serverCard = Ui.card(this, 18);
+        serverCard.setGravity(Gravity.CENTER_VERTICAL);
+        serverCard.setOrientation(LinearLayout.HORIZONTAL);
+        TextView serverIcon = Ui.text(this, "◎", 25, Ui.GREEN, true);
+        serverIcon.setGravity(Gravity.CENTER);
+        serverIcon.setBackground(Ui.oval(Ui.PALE_GREEN));
+        serverCard.addView(serverIcon, new LinearLayout.LayoutParams(
+                Ui.dp(this, 48), Ui.dp(this, 48)));
+        LinearLayout serverText = Ui.column(this, 0, 0, 0, 0);
+        serverName = Ui.text(this, "尚未添加服务器", 17, Ui.INK, true);
+        serverDetail = Ui.text(this, "点击右上角＋添加", 13, Ui.MUTED, false);
+        serverDetail.setPadding(0, Ui.dp(this, 4), 0, 0);
+        serverText.addView(serverName);
+        serverText.addView(serverDetail);
+        LinearLayout.LayoutParams serverTextParams = new LinearLayout.LayoutParams(
+                0, LinearLayout.LayoutParams.WRAP_CONTENT, 1);
+        serverTextParams.leftMargin = Ui.dp(this, 14);
+        serverCard.addView(serverText, serverTextParams);
+        serverCard.addView(Ui.text(this, "›", 30, Ui.MUTED, false));
+        serverCard.setOnClickListener(v -> startActivity(
+                new Intent(this, ServerListActivity.class)));
+        root.addView(serverCard, Ui.matchWrap(this));
+
+        TextView update = Ui.text(this, "检查应用更新", 15, Ui.GREEN, true);
+        update.setGravity(Gravity.CENTER);
+        update.setPadding(0, Ui.dp(this, 25), 0, Ui.dp(this, 14));
+        update.setOnClickListener(v -> checkUpdate());
+        root.addView(update);
+
+        TextView foot = Ui.text(this, "端口故障时自动切换 · 节点不可用时自动尝试下一台 VPS",
+                12, Ui.MUTED, false);
+        foot.setGravity(Gravity.CENTER);
+        root.addView(foot);
+
         scroll.addView(root);
         setContentView(scroll);
     }
 
-    private void registerDevice() {
-        final String name = profileName.getText().toString().trim();
-        final String rawHost = serverHost.getText().toString().trim();
-        final String rawPin = fingerprint.getText().toString().trim();
-        final String token = enrollmentToken.getText().toString().trim();
-        if (rawHost.isEmpty() || rawPin.isEmpty() || token.isEmpty()) {
-            status.setText("请填写服务器、证书指纹和令牌");
+    @Override protected void onResume() {
+        super.onResume();
+        refreshProfile();
+    }
+
+    private void refreshProfile() {
+        ServerProfile profile = store.active();
+        if (profile == null) {
+            serverName.setText("尚未添加服务器");
+            serverDetail.setText("点击右上角＋添加");
+            connected = false;
+            renderConnection("未连接", null, null, -1);
+            connectButton.setEnabled(false);
             return;
         }
-        registerButton.setEnabled(false);
-        status.setText("正在安全注册");
-        worker.execute(() -> {
-            try {
-                String host = ServerProfile.normalizeHost(rawHost);
-                String pin = ServerProfile.normalizeFingerprint(rawPin);
-                KeyPair pair = new KeyPair();
-                ApiClient api = new ApiClient(host, pin);
-                org.json.JSONObject response = api.enroll(token,
-                        pair.getPublicKey().toBase64(),
-                        Build.MODEL == null ? "Android" : Build.MODEL, null);
-                FlowConfig config = FlowConfig.fromServer(response);
-                store.addProfile(name, host, pin, response.getString("device_token"),
-                        pair.getPrivateKey().toBase64(), config);
-                runOnUiThread(() -> {
-                    enrollmentToken.setText("");
-                    profileName.setText("");
-                    status.setText("注册完成");
-                    registerButton.setEnabled(true);
-                    refreshProfiles();
-                });
-            } catch (Exception exception) {
-                runOnUiThread(() -> {
-                    status.setText("注册失败：" + friendly(exception));
-                    registerButton.setEnabled(true);
-                });
-            }
-        });
+        serverName.setText(profile.name);
+        serverDetail.setText(profile.host + "  ·  UDP " + profile.currentPort);
+        connectButton.setEnabled(true);
+        connected = store.autoConnect() && TunnelController.get(this).isUp();
+        renderConnection(connected ? "已连接" :
+                        (store.autoConnect() ? "正在恢复连接" : "准备就绪"),
+                profile.name, profile.host, profile.currentPort);
+    }
+
+    private void renderConnection(String value, String name, String host, int port) {
+        status.setText(value);
+        boolean active = connected || store.autoConnect();
+        power.setText(active ? "✓" : "⌁");
+        power.setTextColor(active ? Color.WHITE : Ui.GREEN);
+        power.setBackground(Ui.oval(active ? Ui.GREEN : Ui.PALE_GREEN));
+        connectButton.setText(active ? "断开连接" : "连接");
+        connectButton.setBackground(Ui.rounded(active ? Ui.SOFT_RED : Ui.GREEN, 18));
+        connectButton.setTextColor(active ? Ui.RED : Color.WHITE);
+        if (host != null) {
+            detail.setText((name == null ? "" : name + "  ·  ") + host
+                    + (port > 0 ? "  ·  UDP " + port : ""));
+            serverName.setText(name == null ? host : name);
+            serverDetail.setText(host + (port > 0 ? "  ·  UDP " + port : ""));
+        } else {
+            detail.setText(store.registered() ? "点击连接以启动安全隧道"
+                    : "添加一台 VPS 后即可开始");
+        }
     }
 
     private void requestVpn() {
         if (!store.registered()) {
-            status.setText("请先添加并注册服务器");
+            startActivity(new Intent(this, AddServerActivity.class));
             return;
         }
         Intent permission = VpnService.prepare(this);
@@ -209,34 +214,26 @@ public final class MainActivity extends Activity {
     }
 
     private void startVpn() {
+        store.setAutoConnect(true);
         startServiceAction(FlowLinkMonitorService.ACTION_START);
-        status.setText("正在连接");
+        connected = false;
+        renderConnection("正在连接", null, null, -1);
     }
 
     private void stopVpn() {
+        store.setAutoConnect(false);
         startServiceAction(FlowLinkMonitorService.ACTION_STOP);
+        connected = false;
+        renderConnection("已断开", null, null, -1);
     }
 
     private void checkUpdate() {
         if (!store.registered()) {
-            status.setText("请先注册服务器");
+            startActivity(new Intent(this, AddServerActivity.class));
             return;
         }
         startServiceAction(FlowLinkMonitorService.ACTION_CHECK_UPDATE);
         status.setText("正在检查更新");
-    }
-
-    private void removeCurrent() {
-        ServerProfile profile = store.active();
-        if (profile == null) return;
-        stopVpn();
-        try {
-            store.removeProfile(profile.id);
-            status.setText("服务器已从手机删除");
-            refreshProfiles();
-        } catch (Exception exception) {
-            status.setText("删除失败");
-        }
     }
 
     private void startServiceAction(String action) {
@@ -244,90 +241,8 @@ public final class MainActivity extends Activity {
         startForegroundService(intent);
     }
 
-    private void refreshProfiles() {
-        refreshingProfiles = true;
-        shownProfiles = store.profiles();
-        ArrayAdapter<ServerProfile> adapter = new ArrayAdapter<>(this,
-                android.R.layout.simple_spinner_item, shownProfiles);
-        adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
-        profileSpinner.setAdapter(adapter);
-        ServerProfile active = store.active();
-        int selected = 0;
-        for (int i = 0; active != null && i < shownProfiles.size(); i++)
-            if (shownProfiles.get(i).id.equals(active.id)) selected = i;
-        if (!shownProfiles.isEmpty()) profileSpinner.setSelection(selected);
-        boolean any = !shownProfiles.isEmpty();
-        connectButton.setEnabled(any);
-        disconnectButton.setEnabled(any);
-        removeButton.setEnabled(any);
-        if (active != null) {
-            detail.setText(active.name + " · " + active.host);
-            if (!store.autoConnect()) status.setText("已注册，等待连接");
-        } else {
-            detail.setText("尚未添加服务器");
-            status.setText("未注册");
-        }
-        refreshingProfiles = false;
-    }
-
-    private static String friendly(Exception exception) {
-        String value = exception.getMessage();
-        if (value == null) return "请检查网络和令牌";
-        if (value.contains("400")) return "令牌无效、过期或已经使用";
-        if (value.contains("fingerprint") || value.contains("pin"))
-            return "服务器证书指纹不正确";
-        return "请检查服务器地址、网络和证书指纹";
-    }
-
-    private LinearLayout card() {
-        LinearLayout card = new LinearLayout(this);
-        card.setOrientation(LinearLayout.VERTICAL);
-        card.setPadding(dp(20), dp(20), dp(20), dp(20));
-        card.setBackgroundColor(Color.WHITE);
-        return card;
-    }
-
-    private EditText input(String hint, boolean visiblePassword) {
-        EditText value = new EditText(this);
-        value.setHint(hint);
-        value.setSingleLine(true);
-        value.setInputType(InputType.TYPE_CLASS_TEXT | (visiblePassword
-                ? InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD
-                : InputType.TYPE_TEXT_VARIATION_NORMAL));
-        return value;
-    }
-
-    private TextView text(String value, int sp, int color) {
-        TextView view = new TextView(this);
-        view.setText(value);
-        view.setTextSize(sp);
-        view.setTextColor(color);
-        return view;
-    }
-
-    private Button button(String value) {
-        Button button = new Button(this);
-        button.setText(value);
-        button.setAllCaps(false);
-        LinearLayout.LayoutParams params = matchWrap();
-        params.topMargin = dp(10);
-        button.setLayoutParams(params);
-        return button;
-    }
-
-    private LinearLayout.LayoutParams matchWrap() {
-        return new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT);
-    }
-
-    private int dp(int value) {
-        return Math.round(value * getResources().getDisplayMetrics().density);
-    }
-
     @Override protected void onDestroy() {
         unregisterReceiver(statusReceiver);
-        worker.shutdownNow();
         super.onDestroy();
     }
 }
