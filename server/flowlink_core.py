@@ -6,7 +6,7 @@ import shutil, subprocess, tempfile, time, uuid
 from pathlib import Path
 from typing import Iterator
 
-VERSION = "0.3.0"
+VERSION = "0.3.1"
 CONFIG_PATH = Path("/etc/flowlink/node.json")
 STATE_PATH = Path("/var/lib/flowlink/state.json")
 LOCK_PATH = Path("/var/lib/flowlink/state.lock")
@@ -14,6 +14,12 @@ HEALTH_PATH = Path("/var/lib/flowlink/health.json")
 RELEASE_DIR = Path("/var/lib/flowlink/releases")
 UPDATE_PATH = RELEASE_DIR / "update.json"
 APK_PATH = RELEASE_DIR / "FlowLink-latest.apk"
+
+PORT_POLICY_VERSION = 3
+DEFAULT_STABLE_PORTS = [443, 2053, 8443, 51820]
+DEFAULT_ROTATING_PORT_COUNT = 8
+DEFAULT_ROTATION_INTERVAL_SECONDS = 21600
+DEFAULT_PORT_GRACE_SECONDS = 43200
 
 class FlowLinkError(Exception):
     pass
@@ -90,6 +96,24 @@ def initial_state(config: dict) -> dict:
             "next_rotation_at": now + int(config["rotation_interval_seconds"]),
             "devices": {}, "enrollments": {}, "repairs": 0,
             "created_at": now, "updated_at": now}
+
+def migrate_config() -> dict:
+    """Upgrade old nodes without replacing their identity, keys or devices."""
+    config = load_json(CONFIG_PATH)
+    old_version = int(config.get("version", 1))
+    if old_version >= PORT_POLICY_VERSION:
+        return {"changed": False, "version": old_version}
+    config["version"] = PORT_POLICY_VERSION
+    config["ports"] = list(DEFAULT_STABLE_PORTS)
+    config["stable_ports"] = list(DEFAULT_STABLE_PORTS)
+    config["rotating_port_count"] = DEFAULT_ROTATING_PORT_COUNT
+    config["rotating_port_range"] = [20000, 60000]
+    config["rotation_interval_seconds"] = DEFAULT_ROTATION_INTERVAL_SECONDS
+    config["port_grace_seconds"] = DEFAULT_PORT_GRACE_SECONDS
+    atomic_json(CONFIG_PATH, config)
+    rotation = rotate_ports(force=True)
+    return {"changed": True, "from_version": old_version,
+            "version": PORT_POLICY_VERSION, "rotation": rotation}
 
 @contextlib.contextmanager
 def locked_state(config: dict) -> Iterator[dict]:
