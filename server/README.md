@@ -1,4 +1,4 @@
-# FlowLink Server 0.3.0
+# FlowLink Server 0.3.1
 
 Ubuntu server for a private Android WireGuard client with automatic endpoint
 recovery.
@@ -11,8 +11,10 @@ recovery.
 - HMAC-signed configuration responses.
 - HTTPS configuration delivery on TCP 443.
 - IP-SAN bootstrap certificate with a SHA-256 fingerprint.
-- Stable ports plus automatically rotated ports.
-- Two-day old/new port overlap.
+- Four stable ports (`443`, `2053`, `8443`, `51820`) plus eight automatically
+  rotated high ports.
+- Random ports rotate every six hours and retired ports remain valid for twelve
+  hours, allowing clients to refresh cached configuration safely.
 - One-minute health monitor restoring WireGuard peers, NAT and firewall state.
 - Atomic, locked state updates.
 - Existing OpenVPN is not modified.
