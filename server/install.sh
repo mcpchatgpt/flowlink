@@ -103,6 +103,6 @@ systemctl enable --now flowlink-server.service
 systemctl enable --now flowlink-health.timer
 systemctl restart flowlink-server.service flowlink-network.service
 ln -sf /opt/flowlink-server/flowlinkctl.py /usr/local/bin/flowlinkctl
-echo "FlowLink Server 0.3.1 installed"
+echo "FlowLink Server 0.3.2 installed"
 echo "HTTPS API: https://$PUBLIC_IP:443/"
 echo "TLS fingerprint: $(cat /etc/flowlink/tls/fingerprint.sha256)"
