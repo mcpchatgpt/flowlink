@@ -171,7 +171,8 @@ public final class MainActivity extends Activity {
         serverName.setText(profile.name);
         serverDetail.setText(profile.host + "  ·  UDP " + profile.currentPort);
         connectButton.setEnabled(true);
-        connected = store.autoConnect() && TunnelController.get(this).isUp();
+        connected = store.autoConnect()
+                && TunnelController.get(this).hasRecentHandshake(180_000L);
         renderConnection(connected ? "已连接" :
                         (store.autoConnect() ? "正在恢复连接" : "准备就绪"),
                 profile.name, profile.host, profile.currentPort);
@@ -179,13 +180,13 @@ public final class MainActivity extends Activity {
 
     private void renderConnection(String value, String name, String host, int port) {
         status.setText(value);
-        boolean active = connected || store.autoConnect();
-        power.setText(active ? "✓" : "⌁");
-        power.setTextColor(active ? Color.WHITE : Ui.GREEN);
-        power.setBackground(Ui.oval(active ? Ui.GREEN : Ui.PALE_GREEN));
-        connectButton.setText(active ? "断开连接" : "连接");
-        connectButton.setBackground(Ui.rounded(active ? Ui.SOFT_RED : Ui.GREEN, 18));
-        connectButton.setTextColor(active ? Ui.RED : Color.WHITE);
+        boolean requested = store.autoConnect();
+        power.setText(connected ? "✓" : (requested ? "…" : "⌁"));
+        power.setTextColor(connected ? Color.WHITE : Ui.GREEN);
+        power.setBackground(Ui.oval(connected ? Ui.GREEN : Ui.PALE_GREEN));
+        connectButton.setText(requested ? "断开连接" : "连接");
+        connectButton.setBackground(Ui.rounded(requested ? Ui.SOFT_RED : Ui.GREEN, 18));
+        connectButton.setTextColor(requested ? Ui.RED : Color.WHITE);
         if (host != null) {
             detail.setText((name == null ? "" : name + "  ·  ") + host
                     + (port > 0 ? "  ·  UDP " + port : ""));
