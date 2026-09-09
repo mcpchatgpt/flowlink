@@ -1,4 +1,4 @@
-# FlowLink Server 0.3.1
+# FlowLink Server 0.3.2
 
 Ubuntu server for a private Android WireGuard client with automatic endpoint
 recovery.
