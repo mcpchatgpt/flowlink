@@ -19,6 +19,8 @@ Private Android client for FlowLink Server 0.2.0.
 - In-place WireGuard endpoint and UDP-port updates on the active VPS.
 - Certificate-pinned APK update download with SHA-256 verification.
 - Focused connection dashboard with separate add-VPS and server-management screens.
+- WireGuard handshake and receive counters are the tunnel health source of truth;
+  HTTPS control-plane availability no longer causes false UDP-port rotation.
 
 ## First pairing
 
