@@ -6,7 +6,7 @@ import shutil, subprocess, tempfile, time, uuid
 from pathlib import Path
 from typing import Iterator
 
-VERSION = "0.3.1"
+VERSION = "0.3.2"
 CONFIG_PATH = Path("/etc/flowlink/node.json")
 STATE_PATH = Path("/var/lib/flowlink/state.json")
 LOCK_PATH = Path("/var/lib/flowlink/state.lock")
