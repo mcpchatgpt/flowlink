@@ -36,6 +36,9 @@ public final class FlowLinkMonitorService extends Service {
     private int consecutiveFailures;
     private long lastRefresh;
     private String currentProfileId;
+    private static final long HEALTHY_HANDSHAKE_AGE_MS = 45_000L;
+    private static final long PERIODIC_HANDSHAKE_AGE_MS = 180_000L;
+    private static final long PORT_HANDSHAKE_TIMEOUT_MS = 7_000L;
 
     @Override public void onCreate() {
         super.onCreate();
@@ -98,8 +101,7 @@ public final class FlowLinkMonitorService extends Service {
             return;
         }
         try {
-            ApiClient api = new ApiClient(profile.host, profile.fingerprint);
-            if (api.health(null)) {
+            if (tunnel.hasRecentHandshake(PERIODIC_HANDSHAKE_AGE_MS)) {
                 consecutiveFailures = 0;
                 sendStatus(networkChanged ? "网络已切换，VPN正常" : "已连接",
                         profile, profile.currentPort);
@@ -154,20 +156,25 @@ public final class FlowLinkMonitorService extends Service {
                     if (!store.autoConnect()) return;
                     sendStatus("正在尝试端口", profile, port);
                     String privateKey = store.privateKey(profile);
-                    if (tunnel.isUp() && profile.id.equals(currentProfileId))
+                    boolean sameTunnel = tunnel.isUp()
+                            && profile.id.equals(currentProfileId);
+                    TunnelController.Snapshot before = sameTunnel
+                            ? safeSnapshot() : new TunnelController.Snapshot(0, 0, 0);
+                    long attemptStarted = System.currentTimeMillis();
+                    if (sameTunnel && port == profile.currentPort
+                            && before.latestHandshakeMillis > 0
+                            && attemptStarted - before.latestHandshakeMillis
+                            <= HEALTHY_HANDSHAKE_AGE_MS) {
+                        markConnected(profile, port);
+                        return;
+                    }
+                    if (sameTunnel)
                         tunnel.updateEndpoint(profile.config, privateKey, port);
                     else
                         tunnel.connect(profile.config, privateKey, port);
                     currentProfileId = profile.id;
-                    Thread.sleep(1800);
-                    ApiClient api = new ApiClient(profile.host, profile.fingerprint);
-                    if (api.health(null)) {
-                        store.select(profile.id);
-                        store.setCurrentPort(profile.id, port);
-                        consecutiveFailures = 0;
-                        ServerProfile connected = store.active();
-                        sendStatus("已连接", connected, port);
-                        maybeCheckUpdate(connected, false);
+                    if (awaitFreshHandshake(before, attemptStarted)) {
+                        markConnected(profile, port);
                         return;
                     }
                 }
@@ -179,6 +186,38 @@ public final class FlowLinkMonitorService extends Service {
         } finally {
             repairing.set(false);
         }
+    }
+
+    private TunnelController.Snapshot safeSnapshot() {
+        try {
+            return tunnel.snapshot();
+        } catch (Exception ignored) {
+            return new TunnelController.Snapshot(0, 0, 0);
+        }
+    }
+
+    private boolean awaitFreshHandshake(TunnelController.Snapshot before,
+                                        long attemptStarted) throws InterruptedException {
+        long deadline = attemptStarted + PORT_HANDSHAKE_TIMEOUT_MS;
+        while (store.autoConnect() && System.currentTimeMillis() < deadline) {
+            Thread.sleep(350);
+            TunnelController.Snapshot after = safeSnapshot();
+            boolean freshHandshake = after.latestHandshakeMillis
+                    > before.latestHandshakeMillis
+                    && after.latestHandshakeMillis >= attemptStarted - 2_000L;
+            boolean receivedReply = after.receivedBytes > before.receivedBytes;
+            if (freshHandshake || receivedReply) return true;
+        }
+        return false;
+    }
+
+    private void markConnected(ServerProfile profile, int port) throws Exception {
+        store.select(profile.id);
+        store.setCurrentPort(profile.id, port);
+        consecutiveFailures = 0;
+        ServerProfile connected = store.active();
+        sendStatus("已连接", connected, port);
+        maybeCheckUpdate(connected, false);
     }
 
     private void maybeCheckUpdate(ServerProfile profile, boolean forced) {
