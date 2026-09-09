@@ -2,10 +2,27 @@ import base64, hashlib, hmac, tempfile, unittest
 from pathlib import Path
 from unittest.mock import Mock, patch
 import flowlink_core
+import flowlink_server
 from flowlink_core import (FlowLinkError, app_update, effective_ports,
     migrate_config, publish_apk, token_hash, validate_public_key,
     wireguard_status)
 class CoreTests(unittest.TestCase):
+    def test_tls_handshake_is_deferred_to_worker_thread(self):
+        raw_socket = Mock()
+        secure_socket = Mock()
+        tls_context = Mock()
+        tls_context.wrap_socket.return_value = secure_socket
+        server = flowlink_server.FlowLinkHTTPServer.__new__(
+            flowlink_server.FlowLinkHTTPServer)
+        server.tls_context = tls_context
+        with patch.object(flowlink_server.ThreadingHTTPServer, "get_request",
+                          return_value=(raw_socket, ("203.0.113.1", 12345))):
+            result = server.get_request()
+        raw_socket.settimeout.assert_called_once_with(10)
+        tls_context.wrap_socket.assert_called_once_with(
+            raw_socket, server_side=True, do_handshake_on_connect=False)
+        self.assertEqual(result, (secure_socket, ("203.0.113.1", 12345)))
+
     def test_hmac_signature_is_deterministic(self):
         first = hmac.new(b"token", b"body", hashlib.sha256).hexdigest()
         second = hmac.new(b"token", b"body", hashlib.sha256).hexdigest()
