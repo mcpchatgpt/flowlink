@@ -29,6 +29,31 @@ class RateLimiter:
 
 LIMITER = RateLimiter()
 
+class FlowLinkHTTPServer(ThreadingHTTPServer):
+    """Threaded HTTPS server resilient to stalled TLS handshakes."""
+    daemon_threads = True
+    request_queue_size = 128
+
+    def __init__(self, server_address: tuple[str, int], handler_class,
+                 tls_context: ssl.SSLContext):
+        self.tls_context = tls_context
+        super().__init__(server_address, handler_class)
+
+    def get_request(self):
+        raw_socket, address = super().get_request()
+        raw_socket.settimeout(10)
+        try:
+            # Do not perform TLS negotiation in the main accept loop. The
+            # request worker triggers the handshake on its first read/write,
+            # so a client that opens port 443 and then stalls cannot block all
+            # configuration and update requests.
+            secure_socket = self.tls_context.wrap_socket(
+                raw_socket, server_side=True, do_handshake_on_connect=False)
+            return secure_socket, address
+        except Exception:
+            raw_socket.close()
+            raise
+
 class FlowLinkHandler(BaseHTTPRequestHandler):
     server_version = "FlowLink/" + VERSION
     @property
@@ -163,12 +188,11 @@ def main() -> None:
     parser.add_argument("--key", type=Path,
                         default=Path("/etc/flowlink/tls/server.key"))
     args = parser.parse_args()
-    server = ThreadingHTTPServer((args.bind, args.port), FlowLinkHandler)
-    server.config = load_json(CONFIG_PATH)
     context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     context.minimum_version = ssl.TLSVersion.TLSv1_2
     context.load_cert_chain(args.cert, args.key)
-    server.socket = context.wrap_socket(server.socket, server_side=True)
+    server = FlowLinkHTTPServer((args.bind, args.port), FlowLinkHandler, context)
+    server.config = load_json(CONFIG_PATH)
     print(f"FlowLink {VERSION} HTTPS listening on {args.bind}:{args.port}", flush=True)
     server.serve_forever()
 
