@@ -1,5 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
+# The health timer and systemd network unit can invoke this script at the same
+# time during installation or recovery. Serialize nft table replacement so
+# one invocation cannot delete a table while the other is adding rules.
+exec 9>/run/lock/flowlink-network.lock
+flock -x 9
 WAN_IF=$(ip route show default | awk 'NR==1 {print $5}')
 WG_PORT=$(python3 -c 'import json; print(json.load(open("/etc/flowlink/node.json"))["listen_port"])')
 WG_SUBNET=$(python3 -c 'import json; print(json.load(open("/etc/flowlink/node.json"))["subnet"])')
