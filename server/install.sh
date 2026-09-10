@@ -7,7 +7,7 @@ fi
 SOURCE_DIR="$(cd "$(dirname "$0")" && pwd)"
 export DEBIAN_FRONTEND=noninteractive
 apt-get update
-apt-get install -y wireguard-tools nftables python3 openssl ufw curl ca-certificates
+apt-get install -y wireguard-tools nftables python3 openssl ufw curl ca-certificates util-linux
 install -d -m 0755 /opt/flowlink-server
 install -d -m 0700 /etc/flowlink /etc/flowlink/tls /etc/wireguard /var/lib/flowlink
 for file in flowlink_server.py flowlink_core.py flowlinkctl.py apply-network.sh; do
@@ -103,6 +103,6 @@ systemctl enable --now flowlink-server.service
 systemctl enable --now flowlink-health.timer
 systemctl restart flowlink-server.service flowlink-network.service
 ln -sf /opt/flowlink-server/flowlinkctl.py /usr/local/bin/flowlinkctl
-echo "FlowLink Server 0.3.2 installed"
+echo "FlowLink Server 0.3.3 installed"
 echo "HTTPS API: https://$PUBLIC_IP:443/"
 echo "TLS fingerprint: $(cat /etc/flowlink/tls/fingerprint.sha256)"
